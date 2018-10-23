@@ -33,16 +33,16 @@ func RequestGet(url string, timeout uint32) ([]byte, error) {
 				result, _ = ioutil.ReadAll(resp.Body)
 			}
 		}
-		return result, ehand.WithStackError(err)
+		return result, err
 	}
 
 	result, err = ioutil.ReadAll(resp.Body)
 	resp.Close = true
 	if err != nil {
-		return result, ehand.WithStackError(err)
+		return result, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return []byte{}, ehand.WithStackError(fmt.Errorf("request fail: errorcode: %d, errormsg:%s", resp.StatusCode, string(result)))
+		return []byte{}, fmt.Errorf("request fail: errorcode: %d, errormsg:%s", resp.StatusCode, string(result))
 	}
 	//fmt.Printf("request result : %s\n", result)
 	return result, nil
@@ -50,6 +50,7 @@ func RequestGet(url string, timeout uint32) ([]byte, error) {
 }
 
 // timeout millisecond
+// return result, error, errmsg
 func RequestPostJson(url string, timeout uint32, body []byte, header map[string]string) ([]byte, error, string) {
 	var result []byte
 	tout := time.Duration(time.Duration(timeout) * time.Millisecond)
@@ -57,7 +58,7 @@ func RequestPostJson(url string, timeout uint32, body []byte, header map[string]
 	bd := bytes.NewBuffer(body)
 	req, err := http.NewRequest("POST", url, bd)
 	if err != nil {
-		return result, ehand.WithStackError(err), err.Error()
+		return result, err, err.Error()
 	}
 	for k, v := range header {
 		req.Header.Set(k, v)
@@ -78,18 +79,18 @@ func RequestPostJson(url string, timeout uint32, body []byte, header map[string]
 			}
 		}
 
-		return result, ehand.WithStackError(err), err.Error()
+		return result, err, err.Error()
 	}
 	result, err = ioutil.ReadAll(resp.Body)
 	resp.Close = true
 	if err != nil {
-		return result, ehand.WithStackError(err), err.Error()
+		return result, err, err.Error()
 	}
 	if resp.StatusCode != http.StatusOK {
 		if len(result) > 0 {
-			return result, ehand.WithStackError(fmt.Errorf("request fail: errorcode: %d, errormsg:%s", resp.StatusCode, string(result))), string(result)
+			return result, fmt.Errorf("request fail: errorcode: %d, errormsg:%s", resp.StatusCode, string(result)), string(result)
 		} else {
-			return nil, ehand.WithStackError(fmt.Errorf("request fail: errorcode: %d", resp.StatusCode)), ""
+			return nil, fmt.Errorf("request fail: errorcode: %d", resp.StatusCode), ""
 		}
 	}
 	return result, nil, ""

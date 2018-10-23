@@ -211,6 +211,10 @@ func (this *MyLog) SetLogLevelAndNumb(lv string) {
 	this.LogCfg.LogLevel = lv
 }
 
+func (this *MyLog) ResetLogLevel(lv string) {
+	this.SetLogLevelAndNumb(lv)
+	this.Logger.Level = LogLevelToLogrusLevel[lv]
+}
 func (this *MyLog) SetLogConf() {
 	msg := ""
 	if this.LogCfg.LogFile != "" {
@@ -245,6 +249,9 @@ func (this *MyLog) SetLogConf() {
 func (this *MyLog) WriteToLogByFields(msgMap map[string]interface{}, level string, iflogStack bool, exitCode int, ifExitProgram bool) {
 
 	if this.LogLevelNumb > this.GetLogLevelNumb(level) {
+		if ifExitProgram {
+			os.Exit(exitCode)
+		}
 		return
 	}
 	this.Wlock.Lock()
@@ -333,7 +340,12 @@ func (this *MyLog) WriteToLogByFieldsStackExit(msgMap map[string]interface{}, le
 }
 
 func (this *MyLog) WriteToLogByFieldsError(err error, extMsg string, level string, ifStack bool, errCode int, ifExit bool) {
-
+	if this.LogLevelNumb > this.GetLogLevelNumb(level) {
+		if ifExit {
+			os.Exit(errCode)
+		}
+		return
+	}
 	if err == nil {
 		return
 	}
@@ -382,6 +394,12 @@ func (this *MyLog) WriteToLogByFieldsErrorExtramsgStackExit(err error, extMsg st
 }
 
 func (this *MyLog) WriteToLogByMsg(msg string, level string, iflogStack bool, exitCode int, ifExitProgram bool) {
+	if this.LogLevelNumb > this.GetLogLevelNumb(level) {
+		if ifExitProgram {
+			os.Exit(exitCode)
+		}
+		return
+	}
 	if iflogStack {
 		msg = fmt.Sprintf("%s\n\t%s", msg, string(debug.Stack()))
 	}

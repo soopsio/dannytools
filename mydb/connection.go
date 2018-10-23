@@ -16,6 +16,7 @@ type MysqlConCfg struct {
 	User         string
 	Password     string
 	DefaultDb    string
+	Charset      string
 	WriteTimeout int
 	ReadTimeout  int
 	Timeout      int
@@ -83,7 +84,11 @@ func (my *MysqlConCfg) BuildMysqlUrl() string {
 	if my.DefaultDb != "" {
 		urlStr += my.DefaultDb
 	}
-	urlStr += "?charset=utf8mb4,utf8"
+	if my.Charset == "" {
+		urlStr += "?charset=utf8mb4,utf8"
+	} else {
+		urlStr += "?charset=" + my.Charset
+	}
 
 	if my.AutoCommit {
 		urlStr += "&autocommit=true"

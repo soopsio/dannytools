@@ -67,10 +67,42 @@ func ExecCmdTimeOutString(timeout uint32, name string, args ...string) (string, 
 
 }
 
+/* timeout: millisecond
+return: stdout, stderr, error
+*/
+func ExecCmdTimeOutStringNoStack(timeout uint32, name string, args ...string) (string, string, error) {
+
+	var (
+		out    bytes.Buffer
+		errout bytes.Buffer
+		err    error
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Millisecond)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout = &out
+	cmd.Stderr = &errout
+
+	err = cmd.Run()
+
+	if err != nil {
+		return strings.TrimSpace(out.String()), strings.TrimSpace(errout.String()), err
+	} else {
+		return strings.TrimSpace(out.String()), strings.TrimSpace(errout.String()), nil
+	}
+
+}
+
 func ExecCmdTimeOutStringSplit(timeout uint32, cmd string) (string, string, error) {
 	arr := strings.Fields(cmd)
 	args := strings.Join(arr[1:], " ")
 	return ExecCmdTimeOutString(timeout, arr[0], args)
+}
+
+func ExecCmdTimeOutStringBashNoStack(timeout uint32, cmd string) (string, string, error) {
+	return ExecCmdTimeOutStringNoStack(timeout, "bash", "-c", cmd)
 }
 
 func ExecCmdTimeOutStringBash(timeout uint32, cmd string) (string, string, error) {
