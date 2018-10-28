@@ -40,8 +40,8 @@ func EnableEventScheduler(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("OK to enable event_scheduler, but fail to read back value of event_scheduler: %s", err)
 	}
-	if result != "1" {
-		return fmt.Errorf("OK to enable event_scheduler, but then read back, the value of event_scheduler is %s, not expected %s", result, "1")
+	if result != "ON" {
+		return fmt.Errorf("OK to enable event_scheduler, but then read back, the value of event_scheduler is %s, not expected %s", result, "ON")
 	}
 	return nil
 }
@@ -54,8 +54,8 @@ func DisableEventScheduler(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("OK to disable event_scheduler, but fail to read back value of event_scheduler: %s", err)
 	}
-	if result != "1" {
-		return fmt.Errorf("OK to disable event_scheduler, but then read back, the value of event_scheduler is %s, not expected %s", result, "0")
+	if result != "OFF" {
+		return fmt.Errorf("OK to disable event_scheduler, but then read back, the value of event_scheduler is %s, not expected %s", result, "OFF")
 	}
 	return nil
 }
@@ -68,8 +68,8 @@ func EnableSuperReadOnly(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("OK to enable super_read_only, but fail to read back value of super_read_only: %s", err)
 	}
-	if result != "1" {
-		return fmt.Errorf("OK to enable super_read_only, but then read back, the value of super_read_only is %s, not expected %s", result, "1")
+	if result != "ON" {
+		return fmt.Errorf("OK to enable super_read_only, but then read back, the value of super_read_only is %s, not expected %s", result, "ON")
 	}
 	return nil
 }
@@ -82,8 +82,8 @@ func DisableSuperReadOnly(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("OK to disable super_read_only, but fail to read back value of super_read_only: %s", err)
 	}
-	if result != "1" {
-		return fmt.Errorf("OK to disable super_read_only, but then read back, the value of super_read_only is %s, not expected %s", result, "0")
+	if result != "OFF" {
+		return fmt.Errorf("OK to disable super_read_only, but then read back, the value of super_read_only is %s, not expected %s", result, "OFF")
 	}
 	return nil
 }
@@ -110,7 +110,7 @@ func DisableReadOnly(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("OK to disable read_only, but fail to read back value of read_only: %s", err)
 	}
-	if result != "1" {
+	if result != "0" {
 		return fmt.Errorf("OK to diable read_only, but then read back, the value of read_only is %s, not expected %s", result, "0")
 	}
 	return nil
