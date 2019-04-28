@@ -6,8 +6,24 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/juju/errors"
+
 	_ "github.com/go-sql-driver/mysql"
 )
+
+const (
+	CdbTypeMysql   string = "mysql"
+	CdbTypeMariadb string = "mariadb"
+)
+
+type MysqlAddr struct {
+	Host string
+	Port int
+}
+
+func (this MysqlAddr) StrAddr() string {
+	return fmt.Sprintf("%s:%d", this.Host, this.Port)
+}
 
 type MysqlConCfg struct {
 	Host         string
@@ -29,15 +45,55 @@ type MysqlConCfg struct {
 	MyUrl string
 }
 
+func (this *MysqlConCfg) GetAddrStr(sep string) string {
+	return fmt.Sprintf("%s%s%d", this.Host, sep, this.Port)
+}
+
+func (this *MysqlConCfg) GetAddrStrDefaultSep() string {
+	return this.GetAddrStr(":")
+}
+
+func (this *MysqlConCfg) CheckNoSocket() error {
+	if this.Host == "" || this.Port <= 0 {
+		return errors.Errorf("empty or invalid mysql addr")
+	}
+	if this.User == "" || this.Password == "" {
+		return errors.Errorf("user or password is empty")
+	}
+	if this.Location != "" {
+		_, err := time.LoadLocation(this.Location)
+		if err != nil {
+			return errors.Annotatef(err, "invalid time zone location %s", this.Location)
+		}
+	}
+	return nil
+}
+
+func (this *MysqlConCfg) Check() error {
+	if (this.Host == "" && this.Port <= 0) || this.Socket == "" {
+		return errors.Errorf("empty or invalid mysql addr")
+	}
+	if this.User == "" || this.Password == "" {
+		return errors.Errorf("user or password is empty")
+	}
+	if this.Location != "" {
+		_, err := time.LoadLocation(this.Location)
+		if err != nil {
+			return errors.Annotatef(err, "invalid time zone location %s", this.Location)
+		}
+	}
+	return nil
+}
+
 func (my *MysqlConCfg) SetMyConDefaultConConfOverwrite() {
 
 	my.Host = "127.0.0.1"
 
 	my.Port = 3306
 
-	my.WriteTimeout = 30 // seconds
-	my.ReadTimeout = 30  //seconds
-	my.Timeout = 10      //seconds
+	my.WriteTimeout = 10 // seconds
+	my.ReadTimeout = 10  //seconds
+	my.Timeout = 5       //seconds
 	my.ParseTime = true
 	my.Location = "Local"
 	my.AutoCommit = true
@@ -51,14 +107,14 @@ func (my *MysqlConCfg) SetMyConDefaultConConfNotOverwrite() {
 		my.Port = 3306
 	}
 	if my.WriteTimeout == 0 {
-		my.WriteTimeout = 30 // seconds
+		my.WriteTimeout = 10 // seconds
 	}
 
 	if my.ReadTimeout == 0 {
-		my.ReadTimeout = 30 //seconds
+		my.ReadTimeout = 10 //seconds
 	}
 	if my.Timeout == 0 {
-		my.Timeout = 10 //seconds
+		my.Timeout = 5 //seconds
 	}
 	if !my.ifParseTime {
 		my.ParseTime = true

@@ -4,6 +4,7 @@ import (
 	"dannytools/constvar"
 	"dannytools/ehand"
 	"dannytools/logging"
+	"dannytools/myemail"
 	"dannytools/myhttp"
 	"dannytools/netip"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/juju/errors"
 	"github.com/toolkits/file"
 )
 
@@ -34,8 +36,10 @@ const (
 )
 
 var (
+	//xx.xx.xx.xx_3309: MySQL Master failover xx.xx.xx.xx(xx.xx.xx.xx:3309)
 	//xx.xx.xx.xx_3307: MySQL Master failover xx.xx.xx.xx(xx.xx.xx.xx:3307) to xx.xx.xx.yy(xx.xx.xx.yy:3307) succeeded
-	MhaReportSubjectReg *regexp.Regexp = regexp.MustCompile(`(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})_(\d+):.+\((\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)\)\s+(\w+)`)
+	MhaSubjMyAddrReg          *regexp.Regexp = regexp.MustCompile(`\((.+?):(\d+)\)`)
+	MhaSubjMyAddrAndResultReg *regexp.Regexp = regexp.MustCompile(`\((.+?):(\d+)\)\s+(\w+)`)
 )
 
 type FailoverSummary struct {
@@ -46,17 +50,26 @@ type FailoverSummary struct {
 	IfSucceed     bool
 }
 
-func (this *FailoverSummary) GetMasterInfoFromReportSubject(subj string) {
-	result := MhaReportSubjectReg.FindStringSubmatch(subj)
-	if len(result) == 6 {
-		this.OldMasterIp = result[1]
-		this.OldMasterPort = result[2]
-		this.NewMasterIp = result[3]
-		this.NewMasterPort = result[4]
-		if result[5] == "succeeded" {
-			this.IfSucceed = true
-		} else {
-			this.IfSucceed = false
+func (this *FailoverSummary) ParseMhaSubject(s string) {
+
+	if s != "" {
+		arr := strings.Split(s, "to")
+
+		tmpArr := MhaSubjMyAddrReg.FindStringSubmatch(arr[0])
+		if len(tmpArr) >= 3 {
+			this.OldMasterIp = tmpArr[1]
+			this.OldMasterPort = tmpArr[2]
+		}
+
+		if len(arr) >= 2 {
+			tmpArr = MhaSubjMyAddrAndResultReg.FindStringSubmatch(arr[1])
+			if len(tmpArr) >= 4 {
+				this.NewMasterIp = tmpArr[1]
+				this.NewMasterPort = tmpArr[2]
+				if tmpArr[3] == "succeeded" {
+					this.IfSucceed = true
+				}
+			}
 		}
 	}
 }
@@ -101,6 +114,109 @@ type AlarmAddrs struct {
 	//	3: sms
 	//	4: phonecall
 	ReportLevel int
+
+	EmailHost     string
+	EmailPort     int
+	EmailUser     string
+	EmailPassword string
+	EmailFrom     string
+}
+
+func (this *AlarmAddrs) SetDefaultNotOverwrite() {
+	if this.UrlRequestTimeout <= 0 {
+		this.UrlRequestTimeout = 2000
+	}
+	if this.ReportLevel <= 0 {
+		this.ReportLevel = ReportLevelEmail
+	}
+}
+
+func (this *AlarmAddrs) CheckOk() bool {
+	if len(this.EmailAddrs) == 0 && len(this.SmsPhones) == 0 && len(this.CallPhones) == 0 && len(this.WebchatAddrs) == 0 {
+		return false
+	}
+	if this.AlarmUrl == "" && (this.EmailHost == "" || this.EmailPort <= 0 || this.EmailUser == "" || this.EmailPassword == "") {
+		return false
+	}
+	return true
+}
+
+func (this *AlarmAddrs) SendReportNoLog(subj, content string) error {
+	var (
+		msgsArr     []*AlarmMsg
+		result      []byte
+		err         error
+		errStr      string
+		bodyMsgByte []byte
+		bodyMsgStr  string
+	)
+	if this.ReportLevel <= ReportLevelNo {
+		return errors.Errorf("ReportLevel is %d, no alarm is sent", this.ReportLevel)
+	}
+	if this.AlarmUrl != "" {
+
+		if this.ReportLevel >= ReportLevelPhoneCall && len(this.CallPhones) > 0 {
+
+			msgsArr = append(msgsArr, &AlarmMsg{
+				Channels: AlarmChannelPhone,
+				Users:    this.CallPhones,
+				Subject:  subj})
+		}
+		if this.ReportLevel >= ReportLevelSms && len(this.SmsPhones) > 0 {
+			msgsArr = append(msgsArr, &AlarmMsg{
+				Channels: AlarmChannelSms,
+				Users:    this.SmsPhones,
+				Subject:  subj})
+		}
+
+		if this.ReportLevel >= ReportLevelWebchat && len(this.WebchatAddrs) > 0 {
+			msgsArr = append(msgsArr, &AlarmMsg{
+				Channels: AlarmChannelWechat,
+				Users:    this.WebchatAddrs,
+				Subject:  subj,
+				Content:  content})
+		}
+
+		if this.ReportLevel >= ReportLevelEmail && len(this.EmailAddrs) > 0 {
+			msgsArr = append(msgsArr, &AlarmMsg{
+				Channels: AlarmChannelEmail,
+				Users:    this.EmailAddrs,
+				Subject:  subj,
+				Content:  content})
+		}
+
+		for i := range msgsArr {
+			msgsArr[i].AddTimeToContent()
+			if this.IfJson {
+				bodyMsgByte, err = msgsArr[i].JsonBytes()
+				if err != nil {
+					return errors.Annotatef(err, "error to marshal alarm msg to json")
+				}
+				result, err, errStr = myhttp.RequestPostJson(this.AlarmUrl, this.UrlRequestTimeout, bodyMsgByte, map[string]string{})
+				bodyMsgStr = string(bodyMsgByte)
+			} else {
+				bodyMsgStr = msgsArr[i].UrlString()
+				result, err, errStr = myhttp.RequestPostJson(this.AlarmUrl, this.UrlRequestTimeout, []byte(bodyMsgStr), map[string]string{})
+			}
+
+			if err != nil {
+				return errors.Annotatef(err, "error to send %s alarm: %s\nresponse: %s\ncontent: %s", msgsArr[i].Channels, errStr, string(result), bodyMsgStr)
+
+			}
+		}
+	} else {
+
+		einfo := myemail.EmailInfo{Host: this.EmailHost, Port: this.EmailPort, UserName: this.EmailUser,
+			Password: this.EmailPassword,
+			From:     this.EmailFrom, To: this.EmailAddrs}
+		eContent := myemail.EmailContent{Subject: subj,
+			Body: myemail.EmailBody{Body: content, ContentType: "text/plain"}}
+		err = einfo.SendEmail(eContent)
+		if err != nil {
+			return errors.Annotatef(err, "error to send email")
+		}
+	}
+	return nil
 }
 
 func (this *AlarmAddrs) Parse(adrFile string) error {
@@ -127,58 +243,74 @@ func (this *AlarmAddrs) SendReports(myLogger *logging.MyLog, subj, content strin
 		bodyMsgByte []byte
 		bodyMsgStr  string
 	)
-	if this.ReportLevel >= ReportLevelPhoneCall && len(this.CallPhones) > 0 {
+	if this.AlarmUrl != "" {
 
-		msgsArr = append(msgsArr, &AlarmMsg{
-			Channels: AlarmChannelPhone,
-			Users:    this.CallPhones,
-			Subject:  subj})
-	}
-	if this.ReportLevel >= ReportLevelSms && len(this.SmsPhones) > 0 {
-		msgsArr = append(msgsArr, &AlarmMsg{
-			Channels: AlarmChannelSms,
-			Users:    this.SmsPhones,
-			Subject:  subj})
-	}
+		if this.ReportLevel >= ReportLevelPhoneCall && len(this.CallPhones) > 0 {
 
-	if this.ReportLevel >= ReportLevelWebchat && len(this.WebchatAddrs) > 0 {
-		msgsArr = append(msgsArr, &AlarmMsg{
-			Channels: AlarmChannelWechat,
-			Users:    this.WebchatAddrs,
-			Subject:  subj,
-			Content:  content})
-	}
-
-	if this.ReportLevel >= ReportLevelEmail && len(this.EmailAddrs) > 0 {
-		msgsArr = append(msgsArr, &AlarmMsg{
-			Channels: AlarmChannelEmail,
-			Users:    this.EmailAddrs,
-			Subject:  subj,
-			Content:  content})
-	}
-
-	for i := range msgsArr {
-		msgsArr[i].AddTimeToContent()
-		if this.IfJson {
-			bodyMsgByte, err = msgsArr[i].JsonBytes()
-			if err != nil {
-				myLogger.WriteToLogByFieldsErrorExtramsgExitCode(err, "error to marshal alarm msg to json", logging.ERROR, ehand.ERR_JSON_MARSHAL)
-				continue
-			}
-			result, err, errStr = myhttp.RequestPostJson(this.AlarmUrl, this.UrlRequestTimeout, bodyMsgByte, map[string]string{})
-			bodyMsgStr = string(bodyMsgByte)
-		} else {
-			bodyMsgStr = msgsArr[i].UrlString()
-			result, err, errStr = myhttp.RequestPostJson(this.AlarmUrl, this.UrlRequestTimeout, []byte(bodyMsgStr), map[string]string{})
+			msgsArr = append(msgsArr, &AlarmMsg{
+				Channels: AlarmChannelPhone,
+				Users:    this.CallPhones,
+				Subject:  subj})
+		}
+		if this.ReportLevel >= ReportLevelSms && len(this.SmsPhones) > 0 {
+			msgsArr = append(msgsArr, &AlarmMsg{
+				Channels: AlarmChannelSms,
+				Users:    this.SmsPhones,
+				Subject:  subj})
 		}
 
+		if this.ReportLevel >= ReportLevelWebchat && len(this.WebchatAddrs) > 0 {
+			msgsArr = append(msgsArr, &AlarmMsg{
+				Channels: AlarmChannelWechat,
+				Users:    this.WebchatAddrs,
+				Subject:  subj,
+				Content:  content})
+		}
+
+		if this.ReportLevel >= ReportLevelEmail && len(this.EmailAddrs) > 0 {
+			msgsArr = append(msgsArr, &AlarmMsg{
+				Channels: AlarmChannelEmail,
+				Users:    this.EmailAddrs,
+				Subject:  subj,
+				Content:  content})
+		}
+
+		for i := range msgsArr {
+			msgsArr[i].AddTimeToContent()
+			if this.IfJson {
+				bodyMsgByte, err = msgsArr[i].JsonBytes()
+				if err != nil {
+					myLogger.WriteToLogByFieldsErrorExtramsgExitCode(err, "error to marshal alarm msg to json", logging.ERROR, ehand.ERR_JSON_MARSHAL)
+					continue
+				}
+				result, err, errStr = myhttp.RequestPostJson(this.AlarmUrl, this.UrlRequestTimeout, bodyMsgByte, map[string]string{})
+				bodyMsgStr = string(bodyMsgByte)
+			} else {
+				bodyMsgStr = msgsArr[i].UrlString()
+				result, err, errStr = myhttp.RequestPostJson(this.AlarmUrl, this.UrlRequestTimeout, []byte(bodyMsgStr), map[string]string{})
+			}
+
+			if err != nil {
+				myLogger.WriteToLogByFieldsErrorExtramsgExitCode(err, fmt.Sprintf("error to send %s alarm: %s\nresponse: %s\ncontent: %s",
+					msgsArr[i].Channels, errStr, string(result), bodyMsgStr),
+					logging.ERROR, ehand.ERR_HTTP_GET)
+			} else {
+				myLogger.WriteToLogByFieldsNormalOnlyMsg(fmt.Sprintf("successfully send %s alarm \nresponse: %s",
+					msgsArr[i].Channels, string(result)), logging.INFO)
+			}
+		}
+	} else {
+		myLogger.WriteToLogByFieldsNormalOnlyMsg("AlarmUrl is empty, only send email", logging.WARNING)
+		einfo := myemail.EmailInfo{Host: this.EmailHost, Port: this.EmailPort, UserName: this.EmailUser,
+			Password: this.EmailPassword,
+			From:     this.EmailFrom, To: this.EmailAddrs}
+		eContent := myemail.EmailContent{Subject: subj,
+			Body: myemail.EmailBody{Body: content, ContentType: "text/plain"}}
+		err = einfo.SendEmail(eContent)
 		if err != nil {
-			myLogger.WriteToLogByFieldsErrorExtramsgExitCode(err, fmt.Sprintf("error to send %s alarm: %s\nresponse: %s\ncontent: %s",
-				msgsArr[i].Channels, errStr, string(result), bodyMsgStr),
-				logging.ERROR, ehand.ERR_HTTP_GET)
+			myLogger.WriteToLogByFieldsErrorExtramsgExitCode(err, "error to send email", logging.ERROR, ehand.ERR_ERROR)
 		} else {
-			myLogger.WriteToLogByFieldsNormalOnlyMsg(fmt.Sprintf("successfully send %s alarm \nresponse: %s",
-				msgsArr[i].Channels, string(result)), logging.INFO)
+			myLogger.WriteToLogByFieldsNormalOnlyMsg("successfully send email", logging.INFO)
 		}
 	}
 }

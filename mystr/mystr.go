@@ -2,6 +2,7 @@ package mystr
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -56,6 +57,13 @@ func UintSliceToStringSlice(t []uint) []string {
 	}
 
 	return arr
+}
+func IntSliceToSting(arr []int, sep string) string {
+	var strArr []string
+	for _, i := range arr {
+		strArr = append(strArr, fmt.Sprintf("%d", i))
+	}
+	return strings.Join(strArr, sep)
 }
 
 func IntSliceToStringSlice(intArr []interface{}) []string {
@@ -146,4 +154,26 @@ func GetQuotedStringFromArr(arr []string, quote, sep string) string {
 		a[i] = quote + arr[i] + quote
 	}
 	return strings.Join(a, sep)
+}
+
+func GetPortIntFromStringLines(lines string) ([]int, error) {
+	var (
+		reg   *regexp.Regexp = regexp.MustCompile(`^\d+$`)
+		arr   []string       = strings.Split(lines, "\n")
+		ptArr []int
+		line  string
+		err   error
+		pt    uint64
+	)
+	for _, line = range arr {
+		line = strings.TrimSpace(line)
+		if !reg.MatchString(line) {
+			continue
+		}
+		pt, err = strconv.ParseUint(line, 10, 32)
+		if err == nil {
+			ptArr = append(ptArr, int(pt))
+		}
+	}
+	return ptArr, err
 }

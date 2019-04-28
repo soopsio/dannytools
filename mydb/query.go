@@ -4,6 +4,9 @@ import (
 	"dannytools/ehand"
 	"database/sql"
 	"fmt"
+	"strings"
+
+	"github.com/juju/errors"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -14,6 +17,7 @@ const (
 	C_mysql_sql_global_vars             string = "show global variables"
 	C_mysql_sql_slave_status            string = "show slave status"
 	C_mysql_sql_slave_status_all        string = "show all slaves status"
+	C_mysql_sql_master_status           string = "show master status"
 	C_mysql_sql_innodb_status           string = "show engine innodb status"
 	C_mysql_sql_disable_readonly        string = "set global read_only = 0"
 	C_mysql_sql_enable_readonly         string = "set global read_only = 1"
@@ -114,6 +118,30 @@ func DisableReadOnly(db *sql.DB) error {
 		return fmt.Errorf("OK to diable read_only, but then read back, the value of read_only is %s, not expected %s", result, "0")
 	}
 	return nil
+}
+
+// return NotFound error if Unknown system variable
+func GetVariableValueStr(db *sql.DB, varName string, ifGlobal bool) (string, error) {
+	var (
+		queryStr string
+		err      error
+		val      string
+	)
+	if ifGlobal {
+		queryStr = fmt.Sprintf("select @@global.%s as val", varName)
+	} else {
+		queryStr = fmt.Sprintf("select @@session.%s as val", varName)
+	}
+	row := db.QueryRow(queryStr)
+	err = row.Scan(&val)
+	if err != nil {
+		if strings.Contains(err.Error(), "Unknown system variable") {
+			return "", errors.NewNotFound(err, "no such variable "+varName)
+		}
+		return "", errors.Annotatef(err, "error to get value of var %s", varName)
+	} else {
+		return val, nil
+	}
 }
 
 // return varValue
@@ -223,4 +251,26 @@ func MysqlShowGlobalStatus(db *sql.DB) (map[string]int64, error) {
 	}
 	return sts, nil
 
+}
+
+func CheckBinlogFormatRowFull(db *sql.DB) error {
+	val, err := GetVariableValueStr(db, "binlog_format", true)
+	if err != nil {
+		return err
+	}
+	if val != "ROW" {
+		return errors.Errorf("binlog_format=%s, must be ROW", val)
+	}
+	val, err = GetVariableValueStr(db, "binlog_row_image", true)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil
+		} else {
+			return err
+		}
+	} else if val != "FULL" {
+		return errors.Errorf("binlog_row_image=%s, must be FULL", val)
+	} else {
+		return nil
+	}
 }

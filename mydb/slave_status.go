@@ -3,12 +3,13 @@ package mydb
 import (
 	"dannytools/ehand"
 	"database/sql"
+
 	//"encoding/binary"
 	"fmt"
-	//"fmt"
 	"strconv"
-
 	"strings"
+
+	"github.com/juju/errors"
 
 	_ "github.com/go-sql-driver/mysql"
 	//"github.com/davecgh/go-spew/spew"
@@ -67,6 +68,37 @@ type MySQLSalveStatus struct {
 	Last_SQL_Errno           int32
 	Last_SQL_Error           string
 	Last_SQL_Error_Timestamp int32
+}
+
+func (this MySQLSalveStatus) String() string {
+	return fmt.Sprintf(`
+	Master_Host=%s
+	Master_Port=%d
+	
+	Master_Log_File=%s
+	Read_Master_Log_Pos=%d
+	
+	Relay_Master_Log_File=%s
+	Exec_Master_Log_Pos=%d
+	
+	Relay_Log_File=%s
+	Relay_Log_Pos=%d
+	
+	Master_UUID=%s
+	Retrieved_Gtid_Set=%s
+	Executed_Gtid_Set=%s
+	`,
+		this.Master_Host,
+		this.Master_Port,
+		this.Master_Log_File,
+		this.Read_Master_Log_Pos,
+		this.Relay_Master_Log_File,
+		this.Exec_Master_Log_Pos,
+		this.Relay_Log_File,
+		this.Relay_Log_Pos,
+		this.Master_UUID,
+		this.Retrieved_Gtid_Set,
+		this.Executed_Gtid_Set)
 }
 
 /*
@@ -476,4 +508,109 @@ func MysqlShowSlaveStatusStr(db *sql.DB) (MySQLSalveStatus, error) {
 	}
 
 	return sts, nil
+}
+
+type MysqlMasterStatus struct {
+	File              string
+	Position          uint64
+	Binlog_Do_DB      string
+	Binlog_Ignore_DB  string
+	Executed_Gtid_Set string
+}
+
+func (this MysqlMasterStatus) String() string {
+	return fmt.Sprintf(`
+	File=%s
+	Position=%d
+	Executed_Gtid_Set=%s
+	Binlog_Do_DB=%s
+	Binlog_Ignore_DB=%s
+	`, this.File, this.Position, this.Executed_Gtid_Set, this.Binlog_Do_DB, this.Binlog_Ignore_DB)
+}
+
+func MysqlShowMasterStatus(db *sql.DB) (MysqlMasterStatus, error) {
+	var (
+		err     error
+		i       int
+		col     string
+		sts     MysqlMasterStatus = MysqlMasterStatus{}
+		tmpUint uint64
+		tmpStr  string
+	)
+
+	rows, err := db.Query(C_mysql_sql_master_status)
+	if rows != nil {
+		defer rows.Close()
+	}
+	if err != nil {
+
+		return sts, errors.Annotate(err, "error to "+C_mysql_sql_master_status)
+	}
+
+	colsNames, err := rows.Columns()
+	if err != nil {
+
+		return sts, errors.Annotate(err, "error to get columns of query result")
+	}
+
+	vals := make([]interface{}, len(colsNames))
+	for i, _ = range colsNames {
+		vals[i] = new(sql.NullString)
+	}
+
+	for rows.Next() {
+		err = rows.Scan(vals...)
+		if err != nil {
+			return sts, errors.Annotate(err, "error to scan query result")
+		}
+		for i, col = range colsNames {
+
+			tmpSqlVal, ok := vals[i].(*sql.NullString)
+			if !ok {
+				return sts, errors.Errorf("fail to convert %s to *sql.NullString\n", col)
+
+			}
+			if (*tmpSqlVal).Valid {
+				tmpStr = (*tmpSqlVal).String
+			} else {
+				continue
+			}
+			tmpStr = strings.TrimSpace(tmpStr)
+			if tmpStr == "" {
+				continue
+			}
+
+			switch col {
+			case "File":
+				sts.File = tmpStr
+			case "Position":
+				tmpUint, err = strconv.ParseUint(tmpStr, 10, 64)
+				if err != nil {
+					return sts, errors.Annotatef(err, "error to parse %s into uint64", tmpStr)
+				}
+				sts.Position = tmpUint
+			case "Binlog_Do_DB":
+				sts.Binlog_Do_DB = tmpStr
+			case "Binlog_Ignore_DB":
+				sts.Binlog_Ignore_DB = tmpStr
+			case "Executed_Gtid_Set":
+				sts.Executed_Gtid_Set = tmpStr
+			}
+		}
+	}
+	return sts, nil
+}
+
+func GetMasterAndSlaveStatus(db *sql.DB, mysqlAddr string) (string, error) {
+
+	masterStatus, err := MysqlShowMasterStatus(db)
+	if err != nil {
+		return "", err
+	}
+	slaveStatus, err := MysqlShowSlaveStatusStr(db)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("show master status of %s :\n%s\nshow slave status of %s: \n%s",
+		mysqlAddr, masterStatus.String(), mysqlAddr, slaveStatus.String()), nil
 }
