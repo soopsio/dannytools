@@ -124,13 +124,7 @@ func (this *TableDef) GetTblDefFromCreateTableDirectly(fullTbName string, stm *a
 }
 
 // create index. primary key cannot be created by create index
-// return NotValidError if it is not unique index or no colunms
 func (this *TableDef) AddIndexFromCreateIndex(fullTbName string, stm *ast.CreateIndexStmt) error {
-
-	if !stm.Unique {
-		// we only care about unique key
-		return errors.NotValidf("not a unique index: %s", stm.Text())
-	}
 	ukey := NewEmptyKeyDef()
 	ukey.Name = stm.IndexName
 	for _, oneCol := range stm.IndexColNames {
